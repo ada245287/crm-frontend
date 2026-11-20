@@ -7,6 +7,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 import { DndContext, DragOverlay, MouseSensor, TouchSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { date, money, stages, type Client, type Deal, type Stage, type Stats, type Task } from "../lib/crm";
 import type { ScreenProps } from "./workspace";
+import { ClientFiles } from "./client-files";
 import { Avatar, Empty, Modal, Skeleton, submit } from "./ui";
 
 export function useData<T>(loader: () => Promise<T>) {
@@ -127,6 +128,7 @@ export function ClientDetail({ api, labels, users, user, id, notify }: ScreenPro
   const { data, error, reload } = useData(load);
   const [modal, setModal] = useState<"deal" | "task">();
   const [busy, setBusy] = useState(false);
+  const [tab,setTab] = useState<"overview"|"files">("overview");
   if (!data || error) return <Pending error={error} reload={reload} />;
   const { client, deals, tasks } = data;
   return <>
@@ -138,12 +140,13 @@ export function ClientDetail({ api, labels, users, user, id, notify }: ScreenPro
           catch (reason) { notify((reason as Error).message, true); } finally { setBusy(false); }
         }}>{users.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}</div>
     </section>
-    <div className="dash-grid">
+    <div className="client-tabs" role="tablist" aria-label="Разделы карточки клиента"><button role="tab" aria-selected={tab==="overview"} aria-controls="client-overview" id="overview-tab" onClick={()=>setTab("overview")}>Обзор</button><button role="tab" aria-selected={tab==="files"} aria-controls="client-files" id="files-tab" onClick={()=>setTab("files")}>Файлы</button></div>
+    {tab==="files" ? <div role="tabpanel" id="client-files" aria-labelledby="files-tab"><ClientFiles id={id} api={api} notify={notify}/></div> : <div className="dash-grid" role="tabpanel" id="client-overview" aria-labelledby="overview-tab">
       <section className="card panel"><div className="section-head"><h2>Сделки</h2><button className="secondary" onClick={() => setModal("deal")}><Plus size={16} /> Сделка</button></div>
         {deals.length ? deals.map(deal => <div className="task-row" key={deal.id}><strong>{deal.title}</strong><StageBadge labels={labels} stage={deal.stage} /><span>{money(deal.amount)}</span></div>) : <Empty>У клиента пока нет сделок</Empty>}</section>
       <section className="card panel"><div className="section-head"><h2>Задачи</h2><button className="secondary" onClick={() => setModal("task")}><Plus size={16} /> Задача</button></div>
         {tasks.length ? tasks.map(task => <TaskRow key={task.id} task={task} />) : <Empty>У клиента пока нет задач</Empty>}</section>
-    </div>
+    </div>}
     {modal && <Modal title={modal === "deal" ? "Новая сделка" : "Новая задача"} close={() => setModal(undefined)}><form onSubmit={async event => {
       const fields = submit(event);
       setBusy(true);
