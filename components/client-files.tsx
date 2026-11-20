@@ -161,6 +161,11 @@ export function ClientFiles({
     [loading, setLoading] = useState(true),
     [error, setError] = useState("");
   const [filter, setFilter] = useState<FileKind | "all">("all");
+  const [selected, setSelected] = useState<File[]>([]);
+  const [selectionError, setSelectionError] = useState("");
+  const [results, setResults] = useState<
+    { name: string; ok: boolean; message: string }[]
+  >([]);
   const [upload, setUpload] = useState<{
     name: string;
     percent: number;
@@ -183,6 +188,19 @@ export function ClientFiles({
     void load();
     return () => controller.current?.abort();
   }, [load]);
+  function choose(items: File[]) {
+    if (controller.current) return;
+    setResults([]);
+    try {
+      items.forEach(inspectFile);
+      setSelected(items);
+      setSelectionError("");
+    } catch (reason) {
+      setSelected([]);
+      setSelectionError((reason as Error).message);
+      if (input.current) input.current.value = "";
+    }
+  }
   async function start(selected: File[]) {
     if (controller.current || !selected.length) return;
     try {
@@ -194,6 +212,8 @@ export function ClientFiles({
     const abort = new AbortController();
     controller.current = abort;
     let success = 0;
+    const saved: File[] = [];
+    setResults([]);
     try {
       for (let i = 0; i < selected.length; i++) {
         if (abort.signal.aborted) break;
@@ -213,12 +233,34 @@ export function ClientFiles({
           }),
         );
         success++;
+        saved.push(file);
+        setResults((previous) => [
+          ...previous,
+          {
+            name: file.name,
+            ok: true,
+            message: "Сохранён в S3, метаданные записаны",
+          },
+        ]);
       }
       if (success)
         notify(
           success === 1 ? "Файл добавлен" : `Добавлено файлов: ${success}`,
         );
     } catch (reason) {
+      const failed = selected[success];
+      if (failed)
+        setResults((previous) => [
+          ...previous,
+          {
+            name: failed.name,
+            ok: false,
+            message:
+              (reason as Error).name === "AbortError"
+                ? "Загрузка отменена"
+                : (reason as Error).message,
+          },
+        ]);
       notify(
         (reason as Error).name === "AbortError"
           ? "Загрузка отменена"
@@ -228,6 +270,9 @@ export function ClientFiles({
     } finally {
       controller.current = null;
       setUpload(undefined);
+      setSelected((previous) =>
+        previous.filter((file) => !saved.includes(file)),
+      );
       if (input.current) input.current.value = "";
       await load();
     }
@@ -247,29 +292,90 @@ export function ClientFiles({
         </div>
         <button
           className="primary"
-          disabled={!!upload || !!error}
+          disabled={!!upload}
           onClick={() => input.current?.click()}
         >
           <Upload size={17} />
-          Загрузить файлы
+          Выбрать файлы
         </button>
       </div>
-      <input
-        ref={input}
-        className="visually-hidden"
-        type="file"
-        multiple
-        accept={acceptedFiles}
-        aria-label="Выбрать файлы клиента"
-        onChange={(event) => void start(Array.from(event.target.files ?? []))}
-      />
+      <div className="file-test-input">
+        <label htmlFor="client-file-picker">Тест загрузки файлов</label>
+        <p id="file-picker-help">
+          Выберите голосовое, фото или видео, затем нажмите «Загрузить в
+          хранилище».
+        </p>
+        <input
+          id="client-file-picker"
+          ref={input}
+          disabled={!!upload}
+          aria-describedby="file-picker-help"
+          type="file"
+          multiple
+          accept={acceptedFiles}
+          aria-label="Выбрать файлы клиента"
+          onChange={(event) => choose(Array.from(event.target.files ?? []))}
+        />
+        {selectionError && (
+          <p className="file-error" role="alert">
+            {selectionError}
+          </p>
+        )}
+        {!!selected.length && (
+          <ul className="file-selection">
+            {selected.map((file, index) => (
+              <li key={file.name + index}>
+                <span>
+                  <strong>{file.name}</strong>
+                  <small>
+                    {fileSize(file.size)} · {kinds[inspectFile(file)]}
+                  </small>
+                </span>
+                <button
+                  className="icon"
+                  disabled={!!upload}
+                  aria-label={`Убрать ${file.name}`}
+                  onClick={() => {
+                    setSelected((previous) =>
+                      previous.filter((_, i) => i !== index),
+                    );
+                    if (input.current) input.current.value = "";
+                  }}
+                >
+                  <X size={16} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <button
+          className="primary file-test-submit"
+          disabled={!selected.length || !!upload}
+          onClick={() => void start(selected)}
+        >
+          <Upload size={17} />
+          {upload ? "Загрузка…" : "Загрузить в хранилище"}
+        </button>
+        {!!results.length && (
+          <ul className="file-test-results" aria-live="polite">
+            {results.map((result, index) => (
+              <li
+                key={index}
+                className={result.ok ? "file-test-ok" : "file-test-failed"}
+              >
+                <strong>{result.name}</strong>
+                <span>{result.message}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
       <div
         className="file-dropzone"
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => {
           event.preventDefault();
-          if (!upload && !error)
-            void start(Array.from(event.dataTransfer.files));
+          if (!upload) choose(Array.from(event.dataTransfer.files));
         }}
       >
         <span className="file-drop-icon">
